@@ -19,6 +19,9 @@ class EnvMode(enum.Enum):
     DROID = "droid"
     LIBERO = "libero"
 
+    # env for testing
+    LIBERO_PI0_BASE = "libero_pi0_base"
+
 
 @dataclasses.dataclass
 class Checkpoint:
@@ -72,6 +75,12 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
     EnvMode.LIBERO: Checkpoint(
         config="pi05_libero",
         dir="gs://openpi-assets/checkpoints/pi05_libero",
+    ),
+
+    # env for testing
+    EnvMode.LIBERO_PI0_BASE: Checkpoint(
+        config="pi0_libero_base",
+        dir="gs://openpi-assets/checkpoints/pi0_base",
     ),
 }
 

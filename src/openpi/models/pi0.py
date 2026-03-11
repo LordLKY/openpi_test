@@ -142,7 +142,7 @@ class Pi0(_model.BaseModel):
     ) -> tuple[
         at.Float[at.Array, "b s emb"],
         at.Bool[at.Array, "b s"],
-        at.Bool[at.Array, " s"],
+        at.Bool[at.Array, "s"],
         at.Float[at.Array, "b emb"] | None,
     ]:
         input_mask = []
