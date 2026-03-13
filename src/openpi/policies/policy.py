@@ -89,10 +89,6 @@ class Policy(BasePolicy):
         
         observation = _model.Observation.from_dict(inputs)
 
-        # print("test jax start state")
-        # print(observation.images)
-        # print(observation.state)
-
         start_time = time.monotonic()
         outputs = {
             "state": inputs["state"],
@@ -103,9 +99,6 @@ class Policy(BasePolicy):
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
         else:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...]), outputs)
-
-        # print("test jax final state")
-        # print(outputs['actions'])
 
         outputs = self._output_transform(outputs)
         outputs["policy_timing"] = {

@@ -12,8 +12,11 @@ from pi0_infer import Pi0Inference
 from openpi.training import config as _config
 from openpi.policies import policy_config as _policy_config
 
+import time
+
 class PiModelEvaluator:
-    def __init__(self, task, model_type: str, triton_path: str, jax_path: str, norm_stats_dir:str, config_name: str, action_horizon:int = 50, state_len: int = 7, action_dim = 7, prompt: str = None, discrete_state_input: bool = True, tokenizer_path: str = None, model_version: str = "pi05"):
+    def __init__(self, task, model_type: str, triton_path: str, jax_path: str, norm_stats_dir:str, config_name: str, action_horizon:int = 50, state_len: int = 7, action_dim = 7, prompt: str = None, discrete_state_input: bool = True, tokenizer_path: str = None, model_version: str = "pi05",
+                 extra_delta_transform:bool = False):
         self.triton_path = triton_path
         self.jax_path = jax_path
         self.task = task
@@ -42,6 +45,8 @@ class PiModelEvaluator:
         self._state_q99 = None
         self._actions_q01 = None
         self._actions_q99 = None
+
+        self.extra_data_transform = extra_delta_transform
 
     def _load_jax_model(self):
         config = _config.get_config(self.config_name)
@@ -93,12 +98,12 @@ class PiModelEvaluator:
             image = einops.rearrange(image, "c h w -> h w c")
         return image
 
-    def _pad_to_dim(self, x: np.ndarray, target_dim: int, axis: int = -1) -> np.ndarray:
+    def _pad_to_dim(self, x: np.ndarray, target_dim: int, axis: int = -1, pad_value: float = 0.0) -> np.ndarray:
         current_dim = x.shape[axis]
         if current_dim < target_dim:
             pad_width = [(0, 0)] * len(x.shape)
             pad_width[axis] = (0, target_dim - current_dim)
-            return np.pad(x, pad_width)
+            return np.pad(x, pad_width, mode='constant', constant_values=pad_value)
         return x
 
     def _resize_with_pad(self, image: np.ndarray, height: int = 224, width: int = 224) -> np.ndarray:
@@ -129,7 +134,7 @@ class PiModelEvaluator:
                 state_mean = np.array(norm_stats["state"]["mean"])
                 state_mean = self._pad_to_dim(state_mean, target_dim)
                 state_std = np.array(norm_stats["state"]["std"])
-                state_std = self._pad_to_dim(state_std, target_dim)
+                state_std = self._pad_to_dim(state_std, target_dim, pad_value=1.0)
                 return (state - state_mean) / (state_std + 1e-6)
         return None
 
@@ -146,7 +151,7 @@ class PiModelEvaluator:
                 actions_mean = np.array(norm_stats["actions"]["mean"])
                 actions_mean = self._pad_to_dim(actions_mean, target_dim)
                 actions_std = np.array(norm_stats["actions"]["std"])
-                actions_std = self._pad_to_dim(actions_std, target_dim)
+                actions_std = self._pad_to_dim(actions_std, target_dim, pad_value=1.0)
                 return actions * (actions_std + 1e-6) + actions_mean
         return None
 
@@ -205,9 +210,10 @@ class PiModelEvaluator:
             # print(actions)
             
             actions = self._unnormalize_actions(actions, self.norm_stats, 32)[:, :self.action_dim]
-            actions[..., :self.action_dim] = actions[..., :self.action_dim] + ori_state[..., :self.action_dim]
-            for i in range(self.action_dim // 7):
-                actions[..., (i + 1) * 7 - 1] = actions[..., (i + 1) * 7 - 1] - ori_state[..., (i + 1) * 7 - 1]
+            if self.extra_data_transform:
+                actions[..., :self.action_dim] = actions[..., :self.action_dim] + ori_state[..., :self.action_dim]
+                for i in range(self.action_dim // 7):
+                    actions[..., (i + 1) * 7 - 1] = actions[..., (i + 1) * 7 - 1] - ori_state[..., (i + 1) * 7 - 1]
             return {
                 "actions": actions
             }
@@ -228,13 +234,17 @@ def main():
     parser.add_argument('--action_dim', type=int, default=7)
     parser.add_argument('--model_version', type=str, choices=['pi0', 'pi05'], default='pi05')
     parser.add_argument('--model_type', type=str, choices=['triton', 'jax'], default='triton')
+
+    parser.add_argument('--state_len', type=int, default=8)
+    parser.add_argument('--extra_delta_transform', action='store_true')
+
     args = parser.parse_args()
 
     example_image_global = cv2.imread("./test_data/sampled_obs/task_00_resized_main.png")  # ("image1.png")
     example_image_left = cv2.imread("./test_data/sampled_obs/task_00_resized_wrist.png")  # ("image2.png")
     example_image_right = cv2.imread("./test_data/sampled_obs/task_00_resized_wrist.png")  # ("image3.png")
     noise = np.random.randn(50, 32).astype(np.float32)
-    state = np.random.randn(8).astype(np.float32)
+    state = np.random.randn(args.state_len).astype(np.float32)
 
     pi_triton = PiModelEvaluator(
         task='check_consistency',
@@ -249,6 +259,7 @@ def main():
         discrete_state_input=args.discrete_state_input,
         tokenizer_path=args.tokenizer_path,
         model_version=args.model_version,
+        extra_delta_transform=args.extra_delta_transform
     )
     pi_jax = PiModelEvaluator(
         task='check_consistency',
@@ -263,8 +274,7 @@ def main():
     triton_list = []
     jax_list = []
     for idx in range(10):
-        state_idx = np.random.randn(8).astype(np.float32)  # state * idx
-        # state_idx = np.zeros(8).astype(np.float32)
+        state_idx = np.random.randn(args.state_len).astype(np.float32)  # state * idx
         inputs_triton = {
             "base_0_rgb": example_image_global,
             "left_wrist_0_rgb": example_image_left,
@@ -284,8 +294,17 @@ def main():
             "observation/wrist_image": example_image_left,
             "observation/state": state_idx,
         }
+
+        triton_start_time = time.perf_counter()
         result_triton = pi_triton.infer(inputs_triton, noise)
+        triton_span = time.perf_counter() - triton_start_time
+
+        jax_start_time = time.perf_counter()
         result_jax = pi_jax.infer(inputs_jax, noise)
+        jax_span = time.perf_counter() - jax_start_time
+
+        print(f"Profile of iter{idx}: triton_span-{triton_span}; jax_span-{jax_span}")
+
         triton_list.append(result_triton['actions'])
         jax_list.append(result_jax['actions'])
         

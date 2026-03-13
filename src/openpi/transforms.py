@@ -136,6 +136,8 @@ class Normalize(DataTransformFn):
 
     def _normalize(self, x, stats: NormStats):
         mean, std = stats.mean[..., : x.shape[-1]], stats.std[..., : x.shape[-1]]
+        mean = pad_to_dim(stats.mean, x.shape[-1], axis=-1, value=0.0)
+        std = pad_to_dim(stats.std, x.shape[-1], axis=-1, value=1.0)
         return (x - mean) / (std + 1e-6)
 
     def _normalize_quantile(self, x, stats: NormStats):
