@@ -678,6 +678,18 @@ def export_to_onnx(
 
     print(f"\nExporting to: {onnx_path}")
 
+    def to_cpu(x):
+        if isinstance(x, torch.Tensor):
+            return x.cpu()
+        elif isinstance(x, tuple):
+            return tuple(to_cpu(i) for i in x)
+        return x
+
+    wrapped_model = wrapped_model.to('cpu')
+    dummy_inputs = to_cpu(dummy_inputs)
+
+    print(f"  Running torch.onnx.export on {next(wrapped_model.model.parameters()).device}...")
+
     with torch.no_grad():
         torch.onnx.export(
             wrapped_model,
